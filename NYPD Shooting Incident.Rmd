@@ -1,0 +1,114 @@
+---
+title: "NYPD Shooting Incident"
+output:
+  html_document: default
+date: "2024-06-12"
+---
+The data comes from the data.gov website, ensuring its reliability. It contains detailed records of every shooting incident in New York City from 2006 to the end of the previous year. This data is collected quarterly and reviewed before being published on the New York Police Department's website. Each record represents a shooting incident in New York City, including the time, location, type of place, and coordinates, as well as information on the perpetrator and the victim, such as their age, race, and gender.
+
+## Import data
+First, we import the shooting data CSV file from the official data.gov website and inspect the data to ensure its integrity and structure.
+```{r Import data, message=FALSE, warning=FALSE}
+library(tidyverse)
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD_Shooting_Incident_ORI <- read_csv(url)
+head(NYPD_Shooting_Incident_ORI)
+```
+
+## Tidy data
+We aim to examine the date of the incidents, the boroughs where they occurred, and the demographics (race, gender) of both perpetrators and victims. We need to convert the date into a proper format and retain only the columns necessary for our analysis. Let's also take a quick look at the data.
+```{r Tidy data, message=FALSE}
+library(lubridate)
+NYPD_Shooting_Incident <- NYPD_Shooting_Incident_ORI%>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))%>%
+  select(c(OCCUR_DATE, BORO, PERP_SEX, PERP_RACE, VIC_SEX, VIC_RACE))
+head(NYPD_Shooting_Incident)
+```
+
+## Check data and arrange it again
+We thoroughly examine the data and remove invalid entries. This includes eliminating rows with NA, null, 'U,' or 'UNKNOWN' values.
+```{r Check data and arrange it again}
+unique(NYPD_Shooting_Incident_ORI$BORO)
+unique(NYPD_Shooting_Incident_ORI$PERP_SEX)
+unique(NYPD_Shooting_Incident_ORI$PERP_RACE)
+unique(NYPD_Shooting_Incident_ORI$VIC_SEX)
+unique(NYPD_Shooting_Incident_ORI$VIC_RACE)
+
+NYPD_Shooting_Incident <- NYPD_Shooting_Incident%>%
+  mutate(PERP_SEX = na_if(PERP_SEX, "(null)"),
+         PERP_SEX = na_if(PERP_SEX, "U"),
+         PERP_RACE = na_if(PERP_RACE, "(null)"),
+         PERP_RACE = na_if(PERP_RACE, "UNKNOWN"),
+         VIC_SEX = na_if(VIC_SEX, "U"),
+         VIC_RACE = na_if(VIC_RACE, "UNKNOWN"))%>%
+  drop_na()
+head(NYPD_Shooting_Incident)
+```
+
+## Count and visualize incident by boroughs
+We analyze the number of incidents per year in each borough to observe trends. Based on the visualizations, the number of incidents and their distribution across different areas appear consistent each year. However, we cannot determine which area has the highest crime rate from the data alone as it lacks population numbers for each location.
+It seems that after the outbreak of COVID-19, shooting incidents have increased. But, many factors could influence the number of incidents, so this is only a preliminary observation.
+```{r Count and visualize incident by boroughs}
+NYPD_Shooting_Incident%>%
+  mutate(year = year(OCCUR_DATE))%>%
+  group_by(BORO, year)%>%
+  count()%>%
+  ggplot(aes(x = year, y = n, fill = BORO)) +
+  geom_col() +
+  labs(title = "NYPD Shooting by Boroughs", y = NULL)
+```
+
+
+## Count and visualize incident by race and sex
+Next, we examine the relationship between the perpetrator and the victim in terms of race and gender. There is a significant gender disparity, with one gender being more prevalent. I also noticed that the racial distribution is quite similar between perpetrators and victims. Therefore, I decided to create another chart focusing on the racial distribution.
+```{r Count and visualize incident by race and sex}
+NYPD_Shooting_Incident%>%
+  group_by(PERP_SEX, PERP_RACE)%>%
+  count()%>%
+  ggplot(aes(x = PERP_SEX, y = n, fill = PERP_RACE)) +
+  geom_col() +
+  labs(title = "NYPD Shooting by perpetrators", y = NULL)
+
+NYPD_Shooting_Incident%>%
+  group_by(VIC_SEX, VIC_RACE)%>%
+  count()%>%
+  ggplot(aes(x = VIC_SEX, y = n, fill = VIC_RACE)) +
+  geom_col() +
+  labs(title = "NYPD Shooting by victims", y = NULL)
+```
+
+## Count and visualize incident by race
+The chart reveals a correlation between the races of perpetrators and victims. Conflicts are more likely to occur within the same race. This makes sense, as more frequent interactions increase the likelihood of disputes. To verify this, we will build a model.
+Let's create and analyze this model to better understand the relationship between the race of perpetrators and victims.
+```{r Count and visualize incident by race}
+NYPD_Shooting_Incident%>%
+  group_by(PERP_RACE, VIC_RACE)%>%
+  count()%>%
+  ggplot(aes(x = PERP_RACE, y = n, fill = VIC_RACE)) +
+  geom_col() +
+  labs(title = "NYPD Shooting by race", y = NULL) +
+  theme(axis.text.x = element_text(angle = -15, hjust = 0))
+```
+
+## Create a model for cases on perpetrator and victim race
+We will use the perpetrator's and victim's race as predictor variables, with the number of cases as the response variable. We will set the model to use a Poisson distribution.
+The calculation results indicate that the perpetrator's and the victim's race are statistically significant predictors.
+```{r Create a model for cases on perpetrator and victim race}
+NYPD_Shooting_mod <- NYPD_Shooting_Incident%>%
+  group_by(PERP_RACE, VIC_RACE)%>%
+  count()%>%
+  rename(cases = n)
+
+mod <- glm(cases ~ PERP_RACE + VIC_RACE, family="poisson",
+           data = NYPD_Shooting_mod)
+summary(mod)
+```
+
+## Sources of Bias
+Consider the sources of bias in the data:
+
+1. Reporting Bias: Not all shootings may be reported or recorded accurately. The likelihood of reporting may depend on time, location, and demographics.
+
+2. Data Completeness: Numerous NULL and UNKNOWN values could indicate incomplete reporting, leading to potential biases. After removing entries with missing values, the dataset's size reduces significantly, which might affect the analysis's representativeness.
+
+By understanding these limitations, we can better interpret our results and be cautious about drawing definitive conclusions from the data.
